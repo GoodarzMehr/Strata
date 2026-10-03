@@ -82,6 +82,23 @@ class Update(unittest.TestCase):
         up.assert_called_once()
         start.assert_not_called()
 
+    def test_update_preserves_fp16_mmap_layer_split(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            args = ["--native", str(root / "Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf"), "--mtp", str(root / "mtp/rt"),
+                    "--max-context", "262144", "--kv", "fp16", "--mmap-experts", "--kv-resident", "32768"]
+            p = self.config(root, args=args, gpu=[0, 1], layer_split="24")
+            with mock.patch.object(setup, "is_wsl", return_value=False), \
+                    mock.patch.object(setup, "download", side_effect=AssertionError("downloaded a model")):
+                rc, _, _, _, start, call, _ = self.run_update([p])
+            saved = json.loads(p.read_text())
+        self.assertEqual(rc, 0)
+        self.assertEqual(saved["args"], args)
+        self.assertEqual(saved["gpu"], [0, 1])
+        self.assertEqual(saved["layer_split"], "24")
+        start.assert_not_called()
+        call.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

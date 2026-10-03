@@ -55,7 +55,13 @@ def normalize(v, t: Path):
     if isinstance(v, list):
         return [normalize(x, t) for x in v]
     if isinstance(v, str):
-        return v.replace(str(t), "<T>").replace("\\", "/").replace(setup.EXE, "<EXE>")
+        value = v.replace(str(t), "<T>").replace("\\", "/")
+        # On Linux EXE is "strata": replacing it throughout the string also changes strata-*.log.
+        if value == setup.EXE:
+            return "<EXE>"
+        if value.endswith("/" + setup.EXE):
+            return value[:-len(setup.EXE)] + "<EXE>"
+        return value
     return v
 
 

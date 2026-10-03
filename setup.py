@@ -29,7 +29,7 @@ answers, no questions), --setup (install another model / change settings instead
 (EXPERIMENTAL, off by default),
 --models-dir DIR, --gguf-dir DIR (use GGUF files you already have), --build (compile instead of the ready-made
 engine), --check (only check this PC), --resident-budget-gib N (UD-Q4_K_XL's experts in RAM), --kv-streaming
-on|off|auto.
+on|off|auto, --mtp-gguf PATH (import the pinned MTP tensors from a local BF16 GGUF).
 
 Setup recommends, it never forces: the recommended answers are the defaults (--yes, or Enter), and a bigger choice
 than it recommends - a longer context, more GPUs, a bigger RAM budget, a size it thinks will not fit - is kept, with
@@ -801,6 +801,7 @@ def whole_shard(s: Path) -> bool:
 
 
 SHARD_NAME = re.compile(r"-(\d{5})-of-(\d{5})\.gguf$")
+UNSLOTH_MERGED = "Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf"
 
 
 def gguf_dir_shards(folder: Path, fam: dict, model: str) -> list[Path]:
@@ -810,6 +811,11 @@ def gguf_dir_shards(folder: Path, fam: dict, model: str) -> list[Path]:
     missing shard is check_shards' error later, as before."""
     first = folder / fam["file"].format(q=model, i=1)
     if not first.exists():
+        # A local merged Unsloth model is the same supported quantization, without the published shard suffix.
+        # Match its exact model name so an MTP GGUF or another Q4 model in this folder cannot be selected.
+        merged = folder / UNSLOTH_MERGED
+        if fam.get("tag") == "unsloth-" and model == "UD-Q4_K_XL" and merged.is_file():
+            return [merged]
         found = sorted(p for p in folder.glob("*-00001-of-*.gguf") if SHARD_NAME.search(p.name))
         mine = [p for p in found if model.lower() in p.name.lower()]
         pick = mine if mine else found
@@ -840,6 +846,8 @@ def gguf_unsupported(name: str) -> str | None:
 def gguf_choice(name: str) -> tuple | None:
     """#444: (--family, --model) whose published first shard this file is, or None (the Coder's IQ1_M is named like
     the original's sizes: the size tells them apart)."""
+    if name == UNSLOTH_MERGED:
+        return "unsloth", "UD-Q4_K_XL"
     for f, d in FAMILIES.items():
         for m in MODELS:
             if f in MODELS[m].get("families", ("qwen", "swift")) and name == d["file"].format(q=m, i=1):
@@ -1984,12 +1992,19 @@ def low_ram_needed(model, ram) -> bool:
     return ram < MODELS[model]["arena_gb"] + LOW_RAM_HEADROOM_GB
 
 
+def kv_bytes_per_token(kv: str) -> int:
+    """K and V storage for 12 QSA layers plus the MTP layer; index and allocator buffers are extra."""
+    cell = {"fp16": 2048, "int8": 1056, "q4_0": 576, "k8v4": 816}[kv]
+    # The drafter uses plain INT8 when the main model uses K8V4 (src/core/mtp.cpp).
+    return 12 * cell + (1056 if kv == "k8v4" else cell)
+
+
 def low_ram_gpu_gb(model, vram_gb, ctx=32768, kv="int8") -> float:
     """About how many GB of the model's experts the GPU's cache holds: its VRAM minus ~5 GB for the dense weights,
     buffers and a 32K context's KV cache, minus the KV cache of a longer context (in VRAM in the low-RAM mode: its RAM
     has no room for KV streaming)."""
-    kv_tok = 13 * (576 if kv == "q4_0" else 1056)       # bytes per context token: 12 QSA layers + the draft layer
-    longer = max(0, ctx - 32768) * kv_tok / 1e9
+    # The ~5 GB baseline includes 32K of INT8 KV. Account for both context length and the chosen format.
+    longer = max(0, ctx * kv_bytes_per_token(kv) - 32768 * kv_bytes_per_token("int8")) / 1e9
     return max(0.0, min(MODELS[model]["arena_gb"], vram_gb - 5 - longer))
 
 
@@ -2099,19 +2114,19 @@ def confirm_paging(model, ram, choice, yes, explicit_model=False):
                                                                           " (--model)" if explicit_model else ""))
 
 
-def ctx_ram_need(model, ctx, low_ram=False):
+def ctx_ram_need(model, ctx, low_ram=False, kv="int8"):
     """#406: the RAM (GB) setup estimates for a long context with IQ3_XXS / IQ3_S: their experts + the context's
-    8-bit KV cache + 24 GB of room for everything else (the 0.1.29 arithmetic, counted).  None where the context does
+    chosen KV cache + 24 GB of room for everything else.  None where the context does
     not count against RAM by this rule: the other sizes, and the low-RAM mode (its KV cache stays in VRAM)."""
     if model not in ("IQ3_XXS", "IQ3_S") or low_ram:
         return None
-    return MODELS[model]["arena_gb"] + ctx * 13 * 1056 / 1e9 + 24
+    return MODELS[model]["arena_gb"] + ctx * kv_bytes_per_token(kv) / 1e9 + 24
 
 
-def ram_ctx(model, ram, low_ram=False) -> int:
+def ram_ctx(model, ram, low_ram=False, kv="int8") -> int:
     """#406: the longest context the RAM rule recommends: 128K, or longer where the estimate fits this PC's RAM.  It
     is part of the recommended default (the smaller of it and the GPU's rule); a longer choice is kept, with a note."""
-    return max(c for c in CONTEXTS if c <= 131072 or (ctx_ram_need(model, c, low_ram) or 0) <= ram)
+    return max(c for c in CONTEXTS if c <= 131072 or (ctx_ram_need(model, c, low_ram, kv) or 0) <= ram)
 
 
 def settings_path() -> Path:
@@ -2328,7 +2343,14 @@ def choices_from_config(cfg_path: Path) -> dict:
     esp_path = esp.rsplit(":", 1)[0] if esp else None
     return {"family": family, "model": model if model in MODELS else None,
             "context": int(val("--max-context")) if val("--max-context") else None,
-            "kv": val("--kv") if val("--kv") in ("int8", "q4_0") else None,
+            "kv": val("--kv") if val("--kv") in ("fp16", "int8", "q4_0", "k8v4") else None,
+            "low_ram": "mmap" if "--mmap-experts" in a else "resident" if "--resident-experts" in a else "auto",
+            "gguf_dir": str(Path(val("--native")).parent) if val("--native") and Path(val("--native")).is_file()
+                        else None,
+            "kv_streaming": "on" if "--kv-resident" in a else "off",
+            "resident_budget_gib": float(val("--resident-budget-gib")) if val("--resident-budget-gib") else None,
+            "vram_reserve_mib": int(val("--vram-reserve-mib")) if val("--vram-reserve-mib") else None,
+            "mtp_gguf": cfg.get("mtp_gguf"),
             "vision": ("gpu" if vis.get("gpu") else "cpu") if isinstance(vis, dict) else "none",
             "esp": ("on" if Path(esp_path).name == ESP_VECTOR.name else esp_path) if esp_path else "off",
             "host": cfg.get("host"), "api_key": cfg.get("api_key"), "port": cfg.get("port"), "gpu": cfg.get("gpu"),
@@ -2384,8 +2406,15 @@ def hardware_key(cfg: dict) -> str:
     g = {"name": " + ".join(x.get("name", "?") for x in gl), "vram_gb": sum(x.get("vram_gb", 0) for x in gl)}
     a = cfg.get("args", [])
     ctx = a[a.index("--max-context") + 1] if "--max-context" in a else "?"
+    val = lambda k, default: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else default  # noqa: E731
+    kv = val("--kv", "fp16")
+    storage = ("budget:" + val("--resident-budget-gib", "?") if "--resident-budget-gib" in a else
+               "resident" if "--resident-experts" in a else "mmap" if "--mmap-experts" in a else "ram")
+    streaming = "stream:" + val("--kv-resident", "?") if "--kv-resident" in a else "vram"
+    reserve = "reserve:" + val("--vram-reserve-mib", "700")
     return "|".join([g.get("name", "?"), f"{g.get('vram_gb', 0):.0f}GB", cpu_info()[0], f"{ram_gb():.0f}GB",
-                     cfg.get("model_name", "?"), ctx, "images" if "--vision" in a else "text"])
+                     cfg.get("model_name", "?"), ctx, "images" if "--vision" in a else "text", kv, storage, streaming,
+                     reserve])
 
 
 def calibrate_config(cfg_path: Path) -> bool:
@@ -2619,6 +2648,16 @@ def draft_vocab_note(vram_gb: float, chosen: str | None) -> list[str]:
             "  fix when the start stops with \"the draft head does not fit\". The model keeps the choice."]
 
 
+def prepare_mtp_source(mtp: Path, gguf: str | None = None, env=None) -> None:
+    """Prepare the pinned raw draft tensors; a refused local import never falls back to a download."""
+    if gguf:
+        say(f"  importing and verifying its pinned BF16 tensors from {gguf}.")
+        run([sys.executable, str(ROOT / "tools" / "mtp_import.py"), "--gguf", gguf, "--out", str(mtp)], env=env)
+    else:
+        say("  only its ~5 GB of MTP tensors are downloaded.")
+        run([sys.executable, str(ROOT / "tools" / "mtp_fetch.py"), "fetch", "--out", str(mtp)], env=env)
+
+
 def mtp_corrupt(mtp: Path, env=None) -> bool:
     """#327: True when the MTP tensors an install fetched are not the pinned checkpoint's (tools/mtp_fetch.py verify,
     which hashes only files that changed since they last checked out).  A mirror that ignored range requests left the
@@ -2738,8 +2777,9 @@ def main() -> int:
     ap.add_argument("--rope-scale", type=float,
                     help="the extension factor (default: the final context over the trained 262144, at least 1 - "
                          "1.5 for 384K, 2 for 512K, 1 inside the trained range)")
-    ap.add_argument("--kv", choices=["int8", "q4_0", "k8v4"],
-                    help="KV cache precision above 8K context: int8 (default), q4_0 (half the memory, a little less "
+    ap.add_argument("--kv", choices=["fp16", "int8", "q4_0", "k8v4"],
+                    help="KV cache precision: fp16 (unquantized K/V, 2048 B/cell), int8 (default above 8K), "
+                         "q4_0 (half the INT8 memory, a little less "
                          "precise) or k8v4 (hybrid: INT8 K + 4-bit V, 816 B/cell)")
     ap.add_argument("--vision", choices=["yes", "no", "none", "gpu", "cpu"],
                     help="let the model read images (yes = the encoder on the GPU)")
@@ -2761,7 +2801,11 @@ def main() -> int:
                                        "remembered for every Strata folder on this PC")
     ap.add_argument("--models-dir", help="where the GGUF files go (default: <data folder>/models)")
     ap.add_argument("--gguf-dir", help="use GGUF files you already have (a folder with every shard: "
-                                       "<name>-00001-of-0000N.gguf ... -0000N-of-0000N.gguf)")
+                                       "<name>-00001-of-0000N.gguf ... -0000N-of-0000N.gguf, or the merged "
+                                       "Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf)")
+    ap.add_argument("--mtp-gguf", metavar="PATH",
+                    help="import the MTP draft tensors from a local BF16 GGUF instead of downloading them; every "
+                         "tensor must match the pinned checkpoint hashes (quantized MTP GGUFs are refused)")
     ap.add_argument("--yes", action="store_true", help="accept the recommended answers")
     ap.add_argument("--setup", action="store_true", help="install another model or change settings")
     ap.add_argument("--no-start", action="store_true", help="install only, do not start the model")
@@ -2782,13 +2826,17 @@ def main() -> int:
                     help="read the model's experts from one file in its folder instead of copying them all into RAM "
                          "(for a PC with a big GPU and little RAM); auto: when the experts would not fit the RAM. In "
                          "this mode the experts the GPU does not hold are copied into RAM once when they fit (resident), "
-                         "else read through the OS file cache (mmap); resident / mmap force one of the two")
+                         "else read through the OS file cache (mmap); resident / mmap force one of the two. "
+                         "UD-Q4_K_XL: mmap reads its GGUF in place and supports --gpus; auto uses a RAM budget "
+                         "on one GPU")
     ap.add_argument("--resident-budget-gib", type=float, metavar="N",
                     help="UD-Q4_K_XL: the GiB of its experts kept in RAM (default: the RAM less 24 GB, 40 on 64 GB; "
                          "more is kept as you choose, with a note)")
     ap.add_argument("--kv-streaming", choices=["auto", "on", "off"], default="auto",
                     help="from a 64K context: keep the KV cache in RAM and only the attention's window in VRAM (more "
                          "experts fit on the GPU); auto: when the RAM has room for it")
+    ap.add_argument("--vram-reserve-mib", type=int,
+                    help="VRAM kept outside the expert cache for CUDA graphs and prompt workspaces; engine default 700")
     ap.add_argument("--backend", choices=["cuda", "hip"],
                     help="cuda = NVIDIA (default), hip = AMD RX 7900 / 7800 / 7700 XT, RX 9060 XT / 9070 / AI PRO R9700 on "
                          "Linux or Windows (chosen by itself when the PC has no NVIDIA card Strata can use)")
@@ -2796,6 +2844,14 @@ def main() -> int:
     a = ap.parse_args()
     if a.resident_budget_gib is not None and not a.resident_budget_gib > 0:
         ap.error("--resident-budget-gib takes a number of GiB above 0, e.g. --resident-budget-gib 32")
+    if a.low_ram == "mmap" and a.resident_budget_gib is not None:
+        ap.error("--low-ram mmap and --resident-budget-gib select different expert storage modes: choose one")
+    if a.vram_reserve_mib is not None and a.vram_reserve_mib < 0:
+        ap.error("--vram-reserve-mib needs a nonnegative number of MiB")
+    if a.mtp_gguf is not None:
+        a.mtp_gguf = str(Path(a.mtp_gguf).expanduser().resolve())
+        if not Path(a.mtp_gguf).is_file():
+            ap.error(f"--mtp-gguf is not a file: {a.mtp_gguf}")
     if a.gpu is not None:                             # --gpu 0,2 means --gpus 0,2 (a user tried it: issue report)
         if "," in a.gpu:
             a.gpus, a.gpu = a.gpus or a.gpu, None
@@ -2823,6 +2879,16 @@ def main() -> int:
                     "copy the same way - the model files are reused, nothing big is downloaded.")
                 a.family, a.model, a.context = ch["family"], ch["model"], a.context or ch["context"]
                 a.kv = a.kv or ch["kv"]
+                if a.low_ram == "auto":
+                    a.low_ram = ch["low_ram"]
+                a.gguf_dir = a.gguf_dir or ch["gguf_dir"]
+                if a.kv_streaming == "auto":
+                    a.kv_streaming = ch["kv_streaming"]
+                if a.resident_budget_gib is None and a.low_ram != "mmap":
+                    a.resident_budget_gib = ch["resident_budget_gib"]
+                a.mtp_gguf = a.mtp_gguf or ch["mtp_gguf"]
+                if a.vram_reserve_mib is None:
+                    a.vram_reserve_mib = ch["vram_reserve_mib"]
                 a.vision = a.vision or ch["vision"]
                 a.experimental_speed_projection = a.experimental_speed_projection or ch["esp"]
                 a.host, a.api_key = a.host or ch["host"], a.api_key or ch["api_key"]
@@ -3021,10 +3087,10 @@ def main() -> int:
     model = a.model or names[int(ask("Which size?", [str(i) for i in range(1, len(names) + 1)], rec, a.yes)) - 1]
     budget = None
     if MODELS[model].get("budget"):
-        # Unsloth's UD-Q4_K_XL: a RAM budget of experts, the rest from the GGUF on the SSD - not the low-RAM mode (no
-        # experts.bin: it would be another 77 GB on the disk), and one GPU (the budget mode has no layer split)
-        warn(f"{model} is EXPERIMENTAL (docs/UNSLOTH_Q4.md): most of its experts are read from the SSD while it "
-             "answers, so it is several times slower than the 2-3-bit models; quality checked against llama.cpp")
+        # Unsloth defaults to a resident RAM budget on one GPU. Explicit mmap instead reads the GGUF through the
+        # OS file cache, supports a layer split, and avoids a second 77 GB experts.bin on disk.
+        warn(f"{model} is EXPERIMENTAL (docs/UNSLOTH_Q4.md): experts outside the GPU and RAM caches are read from "
+             "the SSD; quality checked against llama.cpp")
         if hip:
             # #429 (jkuepker): checked before the 111 GB download.  The HIP engine has no prompt kernels for its
             # Q4_K / Q5_K experts (STRATA_MMQ_KQUANTS is CUDA-only) and it has not been run on AMD: asked, not refused
@@ -3041,13 +3107,16 @@ def main() -> int:
                          f"has {ram:.0f} GB", f"choose one of the 2-3-bit models, or --model {model} --yes to "
                          "install it anyway", "  Install it anyway?")
             warn(f"installing {model} with {ram:.0f} GB of RAM, as you chose")
-        budget = budget_choice(model, ram, a.resident_budget_gib)
-        ok(f"RAM budget: {budget:g} GiB of {model}'s experts in RAM, the rest read from the model files on the SSD")
-        if a.low_ram not in ("auto", "off"):
-            warn(f"--low-ram {a.low_ram} does not apply to {model}: it always reads part of its experts from the files")
-        if multi:
-            warn(f"{model} runs on one GPU: using " + gpu_name(gpu) + " only")
-            multi, sel, chosen = [], [gpu["index"]], [gpu]
+        if a.low_ram == "mmap":
+            ok(f"{model}: mapping experts directly from the GGUF (--low-ram mmap); no fixed RAM budget")
+        else:
+            budget = budget_choice(model, ram, a.resident_budget_gib)
+            ok(f"RAM budget: {budget:g} GiB of {model}'s experts in RAM, the rest read from the model files on the SSD")
+            if a.low_ram not in ("auto", "off"):
+                warn(f"--low-ram {a.low_ram} does not apply to {model}: it always reads part of its experts from the files")
+            if multi:
+                warn(f"{model} runs on one GPU: using " + gpu_name(gpu) + " only")
+                multi, sel, chosen = [], [gpu["index"]], [gpu]
     elif a.resident_budget_gib is not None:
         warn(f"--resident-budget-gib is for UD-Q4_K_XL: {model} keeps all of its experts in RAM or in the low-RAM mode")
     low_ram = budget is None and (a.low_ram in ("on", "resident", "mmap") or
@@ -3059,12 +3128,12 @@ def main() -> int:
         confirm_paging(model, ram, a.low_ram, a.yes, bool(a.model))
     ok(f"size: {model}")
     tag = fam["tag"] + model                           # names of the pack, config and start script
-    small = min(x["vram_gb"] for x in chosen)         # each card keeps its layers' KV of the whole context
+    small = min(x["vram_gb"] for x in chosen)         # each card keeps its own layers' KV of the whole context
     rec_ctx = 32768 if small < 14 else 65536 if small < 20 else 131072
     if budget is not None:                             # UD-Q4_K_XL: every GB of KV is a GB fewer of cached experts
         rec_ctx = 8192 if small < 14 else 32768
     # #406: the RAM rule is part of the recommendation (the smaller of the two), no longer a cap over the user's choice
-    rec_ctx = min(rec_ctx, ram_ctx(model, ram, low_ram))
+    rec_ctx = min(rec_ctx, ram_ctx(model, ram, low_ram, a.kv or "int8"))
     if a.context:
         ctx = a.context
     else:
@@ -3072,7 +3141,7 @@ def main() -> int:
         say("  Context length = how much text the model can see at once (your chat, files, tool output).")
         say("  Longer needs more VRAM for it, so fewer experts fit on the GPU:")
         for i, c in enumerate(CONTEXTS, 1):
-            need_c = ctx_ram_need(model, c, low_ram)
+            need_c = ctx_ram_need(model, c, low_ram, a.kv or "int8")
             note = ("   (recommended for your GPU)" if c == rec_ctx else "") + \
                    ("   (experimental: setup adds rope scaling)" if c > 262144 else "") + \
                    (f"   (needs ~{need_c:.0f} GB RAM, this PC has {ram:.0f}: may run out of memory)"
@@ -3082,7 +3151,7 @@ def main() -> int:
                                str(CONTEXTS.index(rec_ctx) + 1), a.yes)) - 1]
     # #406 #364: a context past the RAM rule (an explicit --context, a pick in the list, or the earlier install's) is
     # kept, with what it risks.  It used to become 128K: users ran 256K fine where setup's estimate said no.
-    need_gb = ctx_ram_need(model, ctx, low_ram)
+    need_gb = ctx_ram_need(model, ctx, low_ram, a.kv or "int8")
     if need_gb is not None and ram < need_gb and ctx > 131072:
         warn(f"{ctx // 1024}K with {model} needs ~{need_gb:.0f} GB of RAM by setup's estimate "
              f"({MODELS[model]['arena_gb']:.0f} GB of experts + the context + room for the rest); this PC has "
@@ -3108,7 +3177,7 @@ def main() -> int:
         ok(f"rope scaling: {scaling}, factor {rope_scale:g} ({origin})")
     ok(f"context: {ctx} tokens")
     # the KV cache (the model's memory of the conversation): 8-bit, or 4-bit after a Hadamard rotation (PR #21)
-    kv = "fp16" if ctx <= 8192 else (a.kv or "int8")
+    kv = a.kv or ("fp16" if ctx <= 8192 else "int8")
     if ctx > 8192 and not a.kv and not a.yes:
         say()
         say("  KV cache precision (the model's memory of the conversation):")
@@ -3116,8 +3185,9 @@ def main() -> int:
         say("  2) 4-bit   half the memory (about 4% faster at 128K), but measurably less precise on long")
         say("             documents; long-context lookups (needle tests) still pass")
         kv = ["int8", "q4_0"][int(ask("KV cache?", ["1", "2"], "1", a.yes)) - 1]
-    if ctx > 8192:
-        ok(f"KV cache: {'8-bit' if kv == 'int8' else '4-bit (Hadamard-rotated)'}")
+    if ctx > 8192 or a.kv:
+        ok("KV cache: " + {"fp16": "FP16 (unquantized K/V)", "int8": "8-bit",
+                            "q4_0": "4-bit (Hadamard-rotated)", "k8v4": "INT8 K + 4-bit V"}[kv])
     if fam.get("vision") is False:
         vision = "none"
         if a.vision not in (None, "no", "none"):
@@ -3206,7 +3276,8 @@ def main() -> int:
     to_fetch = 0 if a.gguf_dir or have_model else max(MODELS[model]["download_gb"] - on_disk, 0)
     need = to_fetch + 8 + \
         (40 if model == "Q2_0" and avx512 and family == "qwen" else 0) + (1 if vision != "none" else 0) + \
-        (MODELS[model]["arena_gb"] + 1 if low_ram and not (model == "Q2_0" and avx512 and family == "qwen") else 0)
+        (MODELS[model]["arena_gb"] + 1 if low_ram and not MODELS[model].get("budget")
+         and not (model == "Q2_0" and avx512 and family == "qwen") else 0)
     if free_gb(models_dir) < need:
         fail(f"not enough free disk space in {models_dir}: need ~{need:.0f} GB" +
              (f" ({on_disk:.0f} GB of the model is already there)" if on_disk >= 1 and not have_model else ""),
@@ -3246,7 +3317,7 @@ def main() -> int:
     else:
         lib_dirs = meta.get("lib_dirs") or meta.get("cuda_dirs") or cuda_lib_dirs()
     engine_ver = tuple(int(x) for x in str(meta.get("version", "0")).split(".")[:3] if x.isdigit())
-    if budget is not None and engine_ver < UNSLOTH_ENGINE:    # checked before the 111 GB download
+    if MODELS[model].get("budget") and engine_ver < UNSLOTH_ENGINE:    # checked before the 111 GB download
         fail(f"{model} needs engine {'.'.join(map(str, UNSLOTH_ENGINE))} or newer; this one is {meta.get('version')}",
              "update Strata (or compile the engine with --build) and run setup again")
     ok(f"engine: {eng / EXE}")
@@ -3303,7 +3374,7 @@ def main() -> int:
         # (UD-Q4_K_XL: --compat-bf16 - its Q8_0 hyper-connection projections become BF16, the form the engine reads)
         run([sys.executable, str(ROOT / "tools" / "iq_pack.py"), "--gguf", str(shards[0]), "--out", str(pack),
              *fam.get("pack_args", [])], env=env)
-    if low_ram and not (pack / "experts.bin").exists():
+    if low_ram and not MODELS[model].get("budget") and not (pack / "experts.bin").exists():
         say(f"  Writing the experts into one file for the low-RAM mode (one time, {MODELS[model]['arena_gb']:.0f} GB) ...")
         run([sys.executable, str(ROOT / "tools" / "iq_pack.py"), "--gguf", str(shards[0]), "--out", str(pack),
              "--experts-bin"], env=env)
@@ -3313,11 +3384,11 @@ def main() -> int:
     corrupt = (rt / "experts.bin").exists() and mtp_corrupt(mtp, env)
     if corrupt:
         warn("some MTP tensors are not the checkpoint's (a download mirror that ignored range requests, #327): "
-             "fetching them again and rebuilding the draft layer")
+             + ("importing them again and rebuilding the draft layer" if a.mtp_gguf else
+                "fetching them again and rebuilding the draft layer"))
     if corrupt or not (rt / "experts.bin").exists():
         say("  The MTP draft layer (speculative decoding, ~2x faster output) comes from the original Qwen checkpoint:")
-        say("  only its ~5 GB of MTP tensors are downloaded.")
-        run([sys.executable, str(ROOT / "tools" / "mtp_fetch.py"), "fetch", "--out", str(mtp)], env=env)
+        prepare_mtp_source(mtp, a.mtp_gguf, env)
         run([sys.executable, str(ROOT / "tools" / "mtp_pack.py"), "--src", str(mtp), "--experts", "q2_0",
              "--out", str(mtp / "mtp-q2_0.gguf")], env=env)
         run([sys.executable, str(ROOT / "tools" / "mtp_rt.py"), "--gguf", str(mtp / "mtp-q2_0.gguf"), "--out", str(rt)],
@@ -3343,7 +3414,7 @@ def main() -> int:
             "--max-context", str(ctx)]
     if scaling is not None:     # the resolved config: explicit flags as given, or the automatic yarn+factor
         args += ["--rope-scaling", scaling, "--rope-scale", f"{rope_scale:g}"]
-    if ctx > 8192:
+    if ctx > 8192 or a.kv:
         args += ["--kv", kv]
     if resident and a.low_ram != "resident" and engine_ver < RESIDENT_ENGINE:
         resident = False                               # an engine from before --resident-experts would refuse it
@@ -3354,7 +3425,7 @@ def main() -> int:
     # KV streaming: from 64K up the whole KV cache lives in RAM and only the part the attention reads (32K positions
     # per layer) stays in VRAM; the VRAM it frees holds more experts (+6% at 128K, +23% at 262K with Q2_0). It
     # costs ~13.7 KB of RAM per context token with 8-bit KV (1.7 GB at 128K), 7.5 KB with 4-bit, so only when it fits.
-    kv_ram_gb = ctx * (13 * (576 if kv == "q4_0" else 1056)) / 1e9   # 12 QSA layers + the draft layer
+    kv_ram_gb = ctx * kv_bytes_per_token(kv) / 1e9
     # Hybrid K8V4 never streams its KV (mode 0 only, layer.hpp), so it is excluded from the WHOLE streaming
     # decision rather than one threshold at a time - a future tier added to this chain cannot reintroduce the
     # combination the engine refuses (PR review).
@@ -3390,7 +3461,9 @@ def main() -> int:
     if budget is not None:     # UD-Q4_K_XL: the experts read from the GGUF in place, the most-used N GiB kept in RAM
         args += ["--resident-budget-gib", f"{budget:g}"]
     if vision != "none":
-        args += ["--vision", "--vram-reserve-mib", str(VISION[vision]["reserve_mib"])]
+        args += ["--vision", "--vram-reserve-mib", str(max(VISION[vision]["reserve_mib"], a.vram_reserve_mib or 0))]
+    elif a.vram_reserve_mib is not None:
+        args += ["--vram-reserve-mib", str(a.vram_reserve_mib)]
     if esp is not None:
         # the package's profile, with llama.cpp's flags (the engine takes the same ones)
         args += ["--control-vector-scaled", f"{esp}:1.0", "--control-vector-layer-range", "4", "44",
@@ -3398,6 +3471,8 @@ def main() -> int:
     cfg = {"exe": str(eng / EXE), "args": args, "cwd": str(ROOT), "tokenizer": str(pack / "tokenizer"),
            "model_name": f"{fam['name']}-{model.lower()}", "log": str(ROOT / f"strata-{tag.lower()}.log"),
            "lib_dirs": lib_dirs, "port": port}
+    if a.mtp_gguf:
+        cfg["mtp_gguf"] = a.mtp_gguf
     if hip:
         cfg["backend"] = "hip"
         # the dense prompt GEMMs through hipBLASLt with kernels measured on this GPU generation (tools/hip; +40-60%

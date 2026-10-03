@@ -1,0 +1,392 @@
+[
+  {
+    "health": {
+      "status": "ok",
+      "max_context": 262144,
+      "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "images": false,
+      "api_key": false,
+      "loaded": true,
+      "service": "strata"
+    },
+    "expected_prompt_tokens": 58,
+    "engine": {
+      "projection": null,
+      "time": 1790984556.1244571,
+      "duration_s": 10.4,
+      "finish": "length",
+      "prompt_tokens": 58,
+      "reused": 0,
+      "output_tokens": 192,
+      "prompt_total": 58,
+      "prompt_read": 58,
+      "engine_generated": 192,
+      "prompt_ms": 3142.4,
+      "decode_ms": 7211.3,
+      "decode_tok_s": 26.6,
+      "hit_rate": 0.855,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 32021.6,
+      "drafts_offered": 152,
+      "drafts_accepted": 131
+    },
+    "usage": {
+      "prompt_tokens": 58,
+      "completion_tokens": 192,
+      "total_tokens": 250,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "request_sha256": "992f1b61e0cbddbcabdf9fe0f87f0f35bbf6c891526331160a8a22ebff91fcbc",
+    "ttft_seconds": 3.188979964936152,
+    "elapsed_seconds": 10.356923642917536,
+    "finish_reason": "length",
+    "answer": "# LRU Cache Implementation in Python\n\n## Overview\n\nAn **LRU (Least Recently Used) Cache** is a fixed-size cache that evicts the least recently used items when capacity is exceeded. This implementation uses a combination of a **doubly linked list** and a **hash map** to achieve O(1) time complexity for both `get` and `put` operations.\n\n## Implementation\n\n```python\nclass Node:\n    \"\"\"\n    Doubly linked list node to store key-value pairs.\n    Each node holds a key, value, and pointers to previous/next nodes.\n    \"\"\"\n    def __init__(self, key: int = 0, value: int = 0):\n        self.key = key\n        self.value = value\n        self.prev = None\n        self.next = None\n\n\nclass LRUCache:\n    \"\"\"\n    Least Recently Used (LRU) Cache with",
+    "markers": [],
+    "markers_found": [],
+    "source_measurement": "short-baseline.json",
+    "settings": "baseline"
+  },
+  {
+    "health": {
+      "status": "ok",
+      "max_context": 200000,
+      "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "images": false,
+      "api_key": false,
+      "loaded": true,
+      "service": "strata"
+    },
+    "expected_prompt_tokens": 4095,
+    "engine": {
+      "projection": null,
+      "time": 1790985182.221165,
+      "duration_s": 17.1,
+      "finish": "length",
+      "prompt_tokens": 4095,
+      "reused": 0,
+      "output_tokens": 192,
+      "prompt_total": 4095,
+      "prompt_read": 4095,
+      "engine_generated": 192,
+      "prompt_ms": 12342.5,
+      "decode_ms": 4739.2,
+      "decode_tok_s": 40.5,
+      "hit_rate": 0.896,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 26344.4,
+      "drafts_offered": 176,
+      "drafts_accepted": 124
+    },
+    "usage": {
+      "prompt_tokens": 4095,
+      "completion_tokens": 192,
+      "total_tokens": 4287,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "request_sha256": "0bea6966346239b5c50c01c06fa83fdb76204636c71d78b25f36edb75c726398",
+    "ttft_seconds": 12.391846525948495,
+    "elapsed_seconds": 17.093848698888905,
+    "finish_reason": "length",
+    "answer": "The three UNIQUE_CODE records found in the document, in order of appearance, are:\n\n1. `falcon-quartz-729`\n2. `amber-willow-381`\n3. `glacier-copper-946`\n\n### Bounded Least Recently Used (LRU) Cache\n\n**What it does:**\nA bounded Least Recently Used (LRU) cache is a fixed-size storage mechanism that evicts the least recently used items when the cache reaches its capacity limit. It operates on the principle that data accessed recently is likely to be accessed again soon (temporal locality). When a new item is added and the cache is full, the item that has not been accessed for the longest time is removed to make space.\n\n**Key Operations:**\n1. **Get:** Retrieve a value by key. If found, mark it as \"most recently used.\"\n2. **Put:** Insert or",
+    "markers": [
+      "falcon-quartz-729",
+      "amber-willow-381",
+      "glacier-copper-946"
+    ],
+    "markers_found": [
+      true,
+      true,
+      true
+    ],
+    "source_measurement": "prefill-4096-reserve1280.json",
+    "settings": "reserve1280-default-drafting"
+  },
+  {
+    "health": {
+      "status": "ok",
+      "max_context": 200000,
+      "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "images": false,
+      "api_key": false,
+      "loaded": true,
+      "service": "strata"
+    },
+    "expected_prompt_tokens": 199799,
+    "engine": {
+      "projection": null,
+      "time": 1790985208.0050533,
+      "duration_s": 136.6,
+      "finish": "length",
+      "prompt_tokens": 199799,
+      "reused": 0,
+      "output_tokens": 192,
+      "prompt_total": 199799,
+      "prompt_read": 199799,
+      "engine_generated": 192,
+      "prompt_ms": 133484.7,
+      "decode_ms": 3073.7,
+      "decode_tok_s": 62.5,
+      "hit_rate": 0.946,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 15462.6,
+      "drafts_offered": 176,
+      "drafts_accepted": 123
+    },
+    "usage": {
+      "prompt_tokens": 199799,
+      "completion_tokens": 192,
+      "total_tokens": 199991,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "request_sha256": "5d8a83e43f1bdb88538703882231a0d14bd562438894fa386fcfb0bce39226b1",
+    "ttft_seconds": 133.89858911710326,
+    "elapsed_seconds": 136.9577012390364,
+    "finish_reason": "length",
+    "answer": "The three UNIQUE_CODE records found in the document, in order of appearance, are:\n\n1. `falcon-quartz-729`\n2. `amber-willow-381`\n3. `glacier-copper-946`\n\n### Explanation of a Bounded Least Recently Used (LRU) Cache\n\nA **Bounded Least Recently Used (LRU) cache** is a fixed-size storage mechanism that evicts the least recently used items when the cache reaches its capacity limit.\n\n**How it works:**\n1.  **Bounded:** The cache has a maximum capacity (e.g., 100 items). It cannot grow indefinitely.\n2.  **Least Recently Used (LRU):** When a new item is added and the cache is full, the item that has not been accessed or added for the longest time is removed to make space.\n3.  **Access Updates Rec",
+    "markers": [
+      "falcon-quartz-729",
+      "amber-willow-381",
+      "glacier-copper-946"
+    ],
+    "markers_found": [
+      true,
+      true,
+      true
+    ],
+    "source_measurement": "long-199800-reserve1280.json",
+    "settings": "reserve1280-default-drafting"
+  },
+  {
+    "health": {
+      "status": "ok",
+      "max_context": 262144,
+      "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "images": false,
+      "api_key": false,
+      "loaded": true,
+      "service": "strata"
+    },
+    "expected_prompt_tokens": 4096,
+    "engine": {
+      "projection": null,
+      "time": 1790985482.6944501,
+      "duration_s": 19.0,
+      "finish": "length",
+      "prompt_tokens": 4096,
+      "reused": 0,
+      "output_tokens": 192,
+      "prompt_total": 4096,
+      "prompt_read": 4096,
+      "engine_generated": 192,
+      "prompt_ms": 13835.5,
+      "decode_ms": 5194.1,
+      "decode_tok_s": 37.0,
+      "hit_rate": 0.895,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 26841.6,
+      "drafts_offered": 177,
+      "drafts_accepted": 125
+    },
+    "usage": {
+      "prompt_tokens": 4096,
+      "completion_tokens": 192,
+      "total_tokens": 4288,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "request_sha256": "46ad89fea35ec9fcd5554c093c5e1104afb1bb62f313a9460941a3ed4d61308d",
+    "ttft_seconds": 13.88636237301398,
+    "elapsed_seconds": 19.041352001018822,
+    "finish_reason": "length",
+    "answer": "The three UNIQUE_CODE records found in the document, in order of appearance, are:\n\n1. `falcon-quartz-729`\n2. `amber-willow-381`\n3. `glacier-copper-946`\n\n### Bounded Least Recently Used (LRU) Cache\n\n**What it does:**\nA bounded Least Recently Used (LRU) cache is a fixed-size storage mechanism that evicts the least recently used items when the cache reaches its capacity limit. It operates on the principle that data accessed recently is likely to be accessed again soon. When a new item is added and the cache is full, the item that has not been accessed for the longest time is removed to make space.\n\n**Key Operations:**\n1. **Get:** Retrieve a value by key. If found, mark it as \"most recently used.\"\n2. **Put:** Insert or update a key-value",
+    "markers": [
+      "falcon-quartz-729",
+      "amber-willow-381",
+      "glacier-copper-946"
+    ],
+    "markers_found": [
+      true,
+      true,
+      true
+    ],
+    "source_measurement": "prefill-4096-context262144-reserve1280.json",
+    "settings": "reserve1280-default-drafting"
+  },
+  {
+    "health": {
+      "status": "ok",
+      "max_context": 262144,
+      "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "images": false,
+      "api_key": false,
+      "loaded": true,
+      "service": "strata"
+    },
+    "expected_prompt_tokens": 261899,
+    "engine": {
+      "projection": null,
+      "time": 1790985513.1450415,
+      "duration_s": 160.1,
+      "finish": "length",
+      "prompt_tokens": 261899,
+      "reused": 0,
+      "output_tokens": 192,
+      "prompt_total": 261899,
+      "prompt_read": 261899,
+      "engine_generated": 192,
+      "prompt_ms": 156749.5,
+      "decode_ms": 3314.1,
+      "decode_tok_s": 57.9,
+      "hit_rate": 0.947,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 15249.4,
+      "drafts_offered": 176,
+      "drafts_accepted": 124
+    },
+    "usage": {
+      "prompt_tokens": 261899,
+      "completion_tokens": 192,
+      "total_tokens": 262091,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "request_sha256": "5d612d95eb42d36ee1a2dc33b0044e5763441e9a7075b26e8829ef1711488f6d",
+    "ttft_seconds": 157.28617534704972,
+    "elapsed_seconds": 160.58436133502983,
+    "finish_reason": "length",
+    "answer": "The three UNIQUE_CODE records in the document, in record order, are:\n\n1. `falcon-quartz-729`\n2. `amber-willow-381`\n3. `glacier-copper-946`\n\n### Explanation of a Bounded Least Recently Used (LRU) Cache\n\nA **Bounded Least Recently Used (LRU) cache** is a fixed-size storage mechanism that evicts the least recently accessed items when the cache reaches its capacity limit.\n\n**How it works:**\n1.  **Bounded:** The cache has a maximum capacity (e.g., 100 items). It cannot grow indefinitely.\n2.  **Least Recently Used:** When a new item is added and the cache is full, the item that has not been accessed (read or written) for the longest time is removed to make space.\n3.  **Access Updates:** Every time",
+    "markers": [
+      "falcon-quartz-729",
+      "amber-willow-381",
+      "glacier-copper-946"
+    ],
+    "markers_found": [
+      true,
+      true,
+      true
+    ],
+    "source_measurement": "long-261900-reserve1280.json",
+    "settings": "reserve1280-default-drafting"
+  },
+  {
+    "health": {
+      "status": "ok",
+      "max_context": 262144,
+      "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "images": false,
+      "api_key": false,
+      "loaded": true,
+      "service": "strata"
+    },
+    "expected_prompt_tokens": 58,
+    "engine": {
+      "projection": null,
+      "time": 1790986217.8533947,
+      "duration_s": 8.7,
+      "finish": "length",
+      "prompt_tokens": 58,
+      "reused": 0,
+      "output_tokens": 192,
+      "prompt_total": 58,
+      "prompt_read": 58,
+      "engine_generated": 192,
+      "prompt_ms": 2286.1,
+      "decode_ms": 6376.2,
+      "decode_tok_s": 30.1,
+      "hit_rate": 0.87,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 30207.0,
+      "drafts_offered": 152,
+      "drafts_accepted": 125
+    },
+    "usage": {
+      "prompt_tokens": 58,
+      "completion_tokens": 192,
+      "total_tokens": 250,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "request_sha256": "1817980b5fb898c21a76d32f9296fa041423cff9f2086ad0a67a1c7d10234b2d",
+    "ttft_seconds": 2.327772188000381,
+    "elapsed_seconds": 8.665234982967377,
+    "finish_reason": "length",
+    "answer": "```python\n\"\"\"\nLRU (Least Recently Used) Cache Implementation\n\nAn LRU cache evicts the least recently used items when the cache reaches its capacity.\nThis implementation uses a combination of a doubly-linked list and a hash map to achieve\nO(1) time complexity for both get and put operations.\n\nThe doubly-linked list maintains the order of usage (most recently used at the head,\nleast recently used at the tail). The hash map provides O(1) lookup for nodes.\n\"\"\"\n\nclass Node:\n    \"\"\"\n    A node in the doubly-linked list used by the LRU cache.\n    \n    Attributes:\n        key: The key associated with this node.\n        value: The value associated with this node.\n        prev: Reference to the previous node in the list.\n        next: Reference to the next node in the list.\n    \"\"\"\n    def __init__(self, key",
+    "markers": [],
+    "markers_found": [],
+    "source_measurement": "short-tuned.json",
+    "settings": "reserve1280-draft-floor070-pcie0-workers15"
+  },
+  {
+    "health": {
+      "status": "ok",
+      "max_context": 262144,
+      "model": "qwen3.8-flash-next-unsloth-ud-q4_k_xl",
+      "images": false,
+      "api_key": false,
+      "loaded": true,
+      "service": "strata"
+    },
+    "expected_prompt_tokens": 261900,
+    "engine": {
+      "projection": null,
+      "time": 1790986237.5329835,
+      "duration_s": 165.4,
+      "finish": "length",
+      "prompt_tokens": 261900,
+      "reused": 0,
+      "output_tokens": 192,
+      "prompt_total": 261900,
+      "prompt_read": 261900,
+      "engine_generated": 192,
+      "prompt_ms": 161446.3,
+      "decode_ms": 3885.7,
+      "decode_tok_s": 49.4,
+      "hit_rate": 0.908,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 22288.5,
+      "drafts_offered": 149,
+      "drafts_accepted": 116
+    },
+    "usage": {
+      "prompt_tokens": 261900,
+      "completion_tokens": 192,
+      "total_tokens": 262092,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "request_sha256": "972e6930c3aec9a089000874772f41b50634d3a9100187f8ae858b0e6572574f",
+    "ttft_seconds": 161.9796518740477,
+    "elapsed_seconds": 165.84768885897938,
+    "finish_reason": "length",
+    "answer": "The three UNIQUE_CODE records in the document, in record order, are:\n\n1. `falcon-quartz-729`\n2. `amber-willow-381`\n3. `glacier-copper-946`\n\n### Explanation of a Bounded Least Recently Used (LRU) Cache\n\nA **Bounded Least Recently Used (LRU) cache** is a fixed-size storage mechanism that evicts the least recently accessed items when the cache reaches its capacity limit.\n\n**How it works:**\n1.  **Bounded:** The cache has a maximum capacity (e.g., 100 items). It cannot grow indefinitely.\n2.  **Least Recently Used:** When a new item is added and the cache is full, the item that has not been accessed for the longest time is removed to make space.\n3.  **Access Updates:** Both reading (`get`) and writing",
+    "markers": [
+      "falcon-quartz-729",
+      "amber-willow-381",
+      "glacier-copper-946"
+    ],
+    "markers_found": [
+      true,
+      true,
+      true
+    ],
+    "source_measurement": "long-261900-tuned.json",
+    "settings": "reserve1280-draft-floor070-pcie0-workers15"
+  }
+]

@@ -94,6 +94,10 @@ The flags (all of them: `START-HERE.bat --help`):
 | `--family qwen\|swift\|coder\|unsloth` | the model version |
 | `--model Q2_0\|IQ2_XS\|IQ3_XXS\|IQ3_S\|IQ1_M\|UD-Q4_K_XL` | the size (the Coder is IQ1_M, Unsloth UD-Q4_K_XL) |
 | `--context N` | context in tokens; default by VRAM: 32768 under 14 GB, 65536 under 20 GB, else 131072 |
+| `--kv fp16\|int8\|q4_0\|k8v4` | KV precision; FP16 avoids additional KV compression. Default INT8 above 8K. |
+| `--gguf-dir PATH --mtp-gguf PATH` | reuse local model files and a pinned-compatible BF16 MTP GGUF |
+| `--low-ram mmap` | read experts through the OS file cache; enables explicit multi-GPU Unsloth Q4_K_XL |
+| `--vram-reserve-mib N` | keep VRAM outside the expert cache for prompt workspaces and CUDA graphs; [dual 4090 example](UNSLOTH_Q4.md#local-gguf-two-gpus-and-fp16-kv) |
 | `--vision yes\|no\|gpu\|cpu` | read pictures; `--yes` leaves images off. AMD cards: `cpu` |
 | `--gpu N` / `--gpus 0,1` / `--gpus all` | one card, or several sharing the model (default: the card with the most VRAM) |
 | `--backend cuda\|hip` | NVIDIA or AMD engine; chosen by itself on a PC with only one kind of card |

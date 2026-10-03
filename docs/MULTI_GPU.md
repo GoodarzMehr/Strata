@@ -85,8 +85,9 @@ strata serve: layer split: layers 0-18 (CUDA0), 19-47 (CUDA1), one hand-off per 
 
 ## What each card holds
 
-- **every card**: a copy of the dense weights (~3.4 GB for the Coder), its own session state (the KV cache of the full
-  context), its verify window and its prompt-path buffers, and an expert cache for its layers filled from the profile;
+- **every card**: a copy of the dense weights (~3.4 GB for the Coder), session state for its own layer range (KV
+  covering the full context for those layers), its verify window and prompt-path buffers, and an expert cache for
+  its layers filled from the profile;
 - **the last card**: also the output head and the draft layer (~0.8 GB);
 - **host RAM**: the expert arena once, shared by all cards (the CPU pool computes whatever no card holds).
 
@@ -106,11 +107,17 @@ into the card that owns the layer.
   - the older helper-GPU caches (`--expert-cache-remote`, docs/SECOND_GPU.md): they take the visible GPUs no stage
     runs on, and hold only experts no stage's cache holds. On the test rig, a 2080 Ti helper made decoding slower,
     as it did without a split: its per-layer round trip costs more than the CPU pool needs for those experts.
-- `--mmap-experts` needs a canonical pack (`experts.bin`), with or without a split; a native (IQ) pack says so at
-  start.
-- The prompt path has its own buffers on every card (1.5 GB each at the default 2048-token chunk; `--prefill 1024`
-  halves that) instead of borrowing cache slots as one card does. An explicit `--expert-cache` on the first card is
-  capped to leave room for them.
+- `--mmap-experts` maps `experts.bin` for canonical packs. Since 0.1.31, a native pack without that file can instead
+  map its original GGUF directly. Unsloth's
+  Q4_K_XL uses this path with explicit setup `--low-ram mmap --gpus 0,1`; its default resident RAM budget remains
+  single-GPU. See [UNSLOTH_Q4.md](UNSLOTH_Q4.md#local-gguf-two-gpus-and-fp16-kv).
+- Full conversation parking (`--conversation-cache-mib`) is currently incompatible with layer splitting. Ordinary
+  shared-prefix checkpoints work across GPUs, but simultaneous agent generation and a unified multi-sequence KV
+  pool are not implemented.
+- Each card's prompt path borrows its own expert-cache slots by default, then refills them for decoding. An explicit
+  `--no-prefill-borrow` keeps separate buffers; `STRATA_SPLIT_OWN=auto` opts into that choice when it fits the split's
+  memory rule. Prompt buffers and CUDA graphs still need headroom: `--vram-reserve-mib` leaves room outside the
+  expert cache.
 - Under WDDM (Windows, and WSL2) only 8 GiB of the expert arena is pinned (more, mapped into two GPU contexts,
   leaves WDDM refusing allocations); the rest streams through the pinned staging ring. A Linux driver has no such
   limit, so there the whole arena is pinned (since 0.1.31; the cap cost a 4090 + 3060 split two thirds of its

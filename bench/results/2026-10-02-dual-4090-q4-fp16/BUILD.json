@@ -1,0 +1,17 @@
+{
+  "source": "local",
+  "version": "0.1.36",
+  "archs": [
+    89
+  ],
+  "vision": "none",
+  "cuda_dirs": [
+    "/usr/local/cuda-13.0/bin",
+    "/usr/local/cuda-13.0/lib64"
+  ],
+  "src": "c658e4ca52442698",
+  "vision_src": null,
+  "host_compiler": "/usr/bin/g++-11",
+  "cuda": "13.0.88",
+  "mmq_kquants": false
+}

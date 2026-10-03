@@ -192,6 +192,7 @@ def narrate_start(log_path: str, offset: int, args: list, done: threading.Event,
         except (OSError, IndexError):
             pass
     size = f"about {gb:.0f} GB" if gb >= 1 else "tens of GB"
+    mapped = "--mmap-experts" in args and "--resident-budget-gib" not in args
     t0 = last = time.time()
     said = set()
 
@@ -216,9 +217,12 @@ def narrate_start(log_path: str, offset: int, args: list, done: threading.Event,
             pos += cut
             for line in chunk[:cut].decode("utf-8", "replace").splitlines():
                 if "PLE on" in line or "expert arena:" in line:
-                    say("arena", f"[strata] loading the experts into RAM ({size}) and locking part of them for the GPU.\n"
-                                 "         YOUR PC CAN BE SLOW OR STOP RESPONDING FOR 1-3 MINUTES NOW - this is normal.\n"
-                                 "         Please wait and don't close this window; the browser opens when it is ready.")
+                    if mapped:
+                        say("arena", "[strata] mapping the model files and preparing the GPU expert caches ...")
+                    else:
+                        say("arena", f"[strata] loading the experts into RAM ({size}) and locking part of them for the GPU.\n"
+                                     "         YOUR PC CAN BE SLOW OR STOP RESPONDING FOR 1-3 MINUTES NOW - this is normal.\n"
+                                     "         Please wait and don't close this window; the browser opens when it is ready.")
                 elif " loaded " in line and "GiB at" in line:
                     say("loaded", "[strata] experts loaded: " + line.split(" loaded ", 1)[1].strip() +
                         f" ({time.time() - t0:.0f} s so far)")

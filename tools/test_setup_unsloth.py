@@ -118,11 +118,88 @@ class Config(unittest.TestCase):
                 ch = setup.choices_from_config(p)
                 self.assertEqual((ch["family"], ch["model"]), (family, model), name)
 
+    def test_saved_mmap_and_kv_choices(self):
+        with tempfile.TemporaryDirectory() as t:
+            native = Path(t) / setup.UNSLOTH_MERGED
+            native.touch()
+            p = Path(t) / "strata-unsloth-ud-q4_k_xl.json"
+            for kv in ("fp16", "int8", "q4_0", "k8v4"):
+                p.write_text(json.dumps({"args": ["--native", str(native), "--max-context", "262144",
+                                                  "--kv", kv, "--mmap-experts", "--kv-resident", "32768",
+                                                  "--vram-reserve-mib", "1280"],
+                                         "gpu": [0, 1], "layer_split": "24", "mtp_gguf": "/models/mtp-BF16.gguf"}))
+                ch = setup.choices_from_config(p)
+                self.assertEqual(ch["kv"], kv)
+                self.assertEqual(ch["low_ram"], "mmap")
+                self.assertEqual(ch["gguf_dir"], t)
+                self.assertEqual(ch["kv_streaming"], "on")
+                self.assertIsNone(ch["resident_budget_gib"])
+                self.assertEqual(ch["vram_reserve_mib"], 1280)
+                self.assertEqual(ch["mtp_gguf"], "/models/mtp-BF16.gguf")
+                self.assertEqual(ch["gpu"], [0, 1])
+                self.assertEqual(ch["layer_split"], "24")
+
+    def test_fp16_memory_estimates(self):
+        self.assertEqual(setup.kv_bytes_per_token("fp16"), 26624)
+        self.assertEqual(setup.kv_bytes_per_token("k8v4"), 10848)    # the draft layer stays INT8
+        ctx = 262144
+        self.assertAlmostEqual(ctx * setup.kv_bytes_per_token("fp16") / 1e9, 6.979321856)
+        self.assertAlmostEqual(setup.ctx_ram_need("IQ3_S", ctx, kv="fp16"), 50.3 + 24 + 6.979321856)
+        fp16 = setup.low_ram_gpu_gb(M, 24, ctx, "fp16")
+        int8 = setup.low_ram_gpu_gb(M, 24, ctx, "int8")
+        self.assertAlmostEqual(int8 - fp16, ctx * 13 * (2048 - 1056) / 1e9)
+
+    def test_earlier_install_preserves_local_model_fp16_and_mmap_split(self):
+        from tools.test_setup_golden import card, install
+        found = [card(i, "NVIDIA GeForce RTX 4090", 24.0, "89") for i in range(2)]
+        with tempfile.TemporaryDirectory() as t:
+            native = Path(t) / setup.UNSLOTH_MERGED
+            native.touch()
+            setup.mark(native)
+            prev = Path(t) / "strata-unsloth-ud-q4_k_xl.json"
+            for streaming in (False, True):
+                args = ["--native", str(native), "--max-context", "262144", "--kv", "fp16", "--mmap-experts",
+                        "--vram-reserve-mib", "1280"]
+                if streaming:
+                    args += ["--kv-resident", "32768"]
+                prev.write_text(json.dumps({"args": args, "gpu": [0, 1], "layer_split": "24"}))
+                download = mock.Mock(side_effect=AssertionError("downloaded an existing local model"))
+                code, out, cfg, _ = install(95.8, found, [], extra=[
+                    mock.patch.object(setup, "previous_config", return_value=prev),
+                    mock.patch.object(setup, "start", return_value=0),
+                    mock.patch.object(setup, "download", download),
+                    mock.patch.dict(sys.modules, {"gguf_reader": types.SimpleNamespace(GGUFFile=FakeGGUF)})])
+                self.assertEqual(code, 0, out)
+                got = cfg["args"]
+                self.assertEqual(got[got.index("--native") + 1], str(native))
+                self.assertEqual(got[got.index("--kv") + 1], "fp16")
+                self.assertEqual(got[got.index("--vram-reserve-mib") + 1], "1280")
+                self.assertIn("--mmap-experts", got)
+                self.assertNotIn("--resident-budget-gib", got)
+                self.assertEqual("--kv-resident" in got, streaming)
+                self.assertEqual(cfg["gpu"], [0, 1])
+                self.assertEqual(cfg["layer_split"], "24")
+                download.assert_not_called()
+
+    def test_calibration_key_separates_kv_and_expert_memory_settings(self):
+        base = {"model_name": "Unsloth", "gpu": [0, 1], "args": ["--max-context", "262144"]}
+        with mock.patch.object(setup, "gpu_info", return_value={"name": "4090", "vram_gb": 24}), \
+                mock.patch.object(setup, "cpu_info", return_value=("9950X", True, True)), \
+                mock.patch.object(setup, "ram_gb", return_value=96):
+            configs = [[], ["--kv", "int8"], ["--mmap-experts"], ["--resident-experts"],
+                       ["--resident-budget-gib", "32"], ["--resident-budget-gib", "48"],
+                       ["--kv-resident", "32768"], ["--kv-resident", "65536"],
+                       ["--vram-reserve-mib", "1280"]]
+            keys = [setup.hardware_key({**base, "args": base["args"] + args}) for args in configs]
+            self.assertEqual(len(set(keys)), len(keys))
+            self.assertEqual(keys[0], setup.hardware_key({**base, "args": base["args"] + ["--kv", "fp16"]}))
+
 
 class FakeGGUF:
     """gguf_reader.GGUFFile: shard 2 holds the PLE table."""
     def __init__(self, path):
-        names = ["per_layer_token_embd.weight"] if "00002-of" in str(path) else ["blk.0.ffn_up_exps.weight"]
+        names = ["per_layer_token_embd.weight"] if "00002-of" in str(path) or Path(path).name == setup.UNSLOTH_MERGED \
+            else ["blk.0.ffn_up_exps.weight"]
         self.tensors = [types.SimpleNamespace(name=n) for n in names]
 
 
@@ -318,6 +395,59 @@ class Main(unittest.TestCase):
         self.assertNotIn("--vision", cfg["args"])
         self.assertNotIn("--mmap-experts", cfg["args"])
         self.assertFalse(any("--experts-bin" in r for r in self.runs))
+
+    def test_merged_mmap_fp16_two_gpus_uses_no_download_or_expert_copy(self):
+        folder = self.t / "local"
+        folder.mkdir()
+        native = folder / setup.UNSLOTH_MERGED
+        native.touch()
+        setup.mark(native)
+        code, out, cfg = self.main(["--gguf-dir", str(folder), "--low-ram", "mmap", "--gpus", "0,1",
+                                    "--context", "262144", "--kv", "fp16", "--kv-streaming", "on",
+                                    "--vram-reserve-mib", "1280"],
+                                   ram=95.8, n_gpus=2, free=8.1)
+        self.assertEqual(code, 0, out)
+        args = cfg["args"]
+        self.assertEqual(args[args.index("--native") + 1], str(native))
+        self.assertEqual(args[args.index("--kv") + 1], "fp16")
+        self.assertEqual(args[args.index("--vram-reserve-mib") + 1], "1280")
+        self.assertIn("--kv-resident", args)
+        self.assertIn("--mmap-experts", args)
+        self.assertNotIn("--resident-budget-gib", args)
+        self.assertNotIn("--resident-experts", args)
+        self.assertEqual(cfg["gpu"], [0, 1])
+        self.assertEqual(cfg["layer_split"], "auto")
+        self.assertEqual(self.downloads, [])
+        self.assertEqual(self.verified, [])    # a merged file has no published shard hash
+        self.assertFalse(any("--experts-bin" in r for r in self.runs))
+        packs = [r for r in self.runs if r[1].endswith("iq_pack.py")]
+        self.assertEqual(len(packs), 1)
+        self.assertIn("--compat-bf16", packs[0])
+        self.assertIn("KV cache lives in RAM (7.0 GB)", out)
+
+    def test_fp16_at_short_and_long_contexts(self):
+        for ctx in (4096, 8192, 32768, 200000, 262144):
+            with self.subTest(context=ctx):
+                code, out, cfg = self.main(["--context", str(ctx), "--kv", "fp16", "--kv-streaming", "off"])
+                self.assertEqual(code, 0, out)
+                args = cfg["args"]
+                self.assertEqual(args[args.index("--kv") + 1], "fp16")
+                self.assertIn("FP16 (unquantized K/V)", out)
+                self.assertNotIn("--kv-resident", args)
+
+    def test_mmap_refuses_a_conflicting_ram_budget(self):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            code, _, cfg = self.main(["--low-ram", "mmap", "--resident-budget-gib", "32"])
+        self.assertEqual(code, 2)
+        self.assertIn("different expert storage modes", err.getvalue())
+        self.assertIsNone(cfg)
+
+    def test_mmap_still_checks_unsloth_engine_version_before_download(self):
+        code, out, cfg = self.main(["--low-ram", "mmap"], version="0.1.31")
+        self.assertEqual(code, 1, out)
+        self.assertIn("needs engine 0.1.32 or newer", out)
+        self.assertEqual(self.downloads, [])
+        self.assertIsNone(cfg)
 
 
 if __name__ == "__main__":

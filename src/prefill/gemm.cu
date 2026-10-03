@@ -42,6 +42,19 @@ void ck(cublasStatus_t s, const char* what) {
     }
 }
 
+void ck_gemm(cublasStatus_t s, const char* dtype, int64_t t, int64_t n, int64_t k, int64_t ldy) {
+    if (s == CUBLAS_STATUS_SUCCESS) return;
+    int device = -1;
+    (void) cudaGetDevice(&device);
+    const cudaError_t pending = cudaPeekAtLastError();
+    size_t free_bytes = 0, total_bytes = 0;
+    (void) cudaMemGetInfo(&free_bytes, &total_bytes);
+    std::fprintf(stderr, "prefill gemm: %s T=%lld N=%lld K=%lld ldy=%lld CUDA%d free=%.1f MiB, CUDA status %s\n",
+                 dtype, (long long) t, (long long) n, (long long) k, (long long) ldy, device,
+                 (double) free_bytes / (1 << 20), cudaGetErrorString(pending));
+    ck(s, "cublasGemmEx");
+}
+
 // #247/#325: on Windows (seen on gfx1201), hipBLAS can return success with the correct BF16/FP16 product for some
 // shapes (hc up once T >= 96, the router) and still leave hipErrorInvalidValue set, which the next kernel's error
 // check turns into an exit. The multiply has finished, so that one stale error is cleared after a GEMM that succeeded;
@@ -385,10 +398,10 @@ void Gemm::bf16(const uint16_t* X, const uint16_t* W, float* Y, int64_t T, int64
     }
 #endif
     // Column-major view: Y^T[N, T] = W[N, K] (stored K x N col-major, transposed) . X^T[K, T].
-    ck(cublasGemmEx((cublasHandle_t) handle_, CUBLAS_OP_T, CUBLAS_OP_N, (int) N, (int) T, (int) K, &alpha, W,
+    ck_gemm(cublasGemmEx((cublasHandle_t) handle_, CUBLAS_OP_T, CUBLAS_OP_N, (int) N, (int) T, (int) K, &alpha, W,
                     CUDA_R_16BF, (int) K, X, CUDA_R_16BF, (int) K, &beta, Y, CUDA_R_32F, (int) ldy,
                     CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT),
-       "cublasGemmEx");
+       "bf16", T, N, K, ldy);
     STRATA_ABSORB_HIPBLAS_STICKY("cublasGemmEx");
 }
 
@@ -404,10 +417,10 @@ void Gemm::f16(const uint16_t* X, const uint16_t* W, float* Y, int64_t T, int64_
         return;
     }
 #endif
-    ck(cublasGemmEx((cublasHandle_t) handle_, CUBLAS_OP_T, CUBLAS_OP_N, (int) N, (int) T, (int) K, &alpha, W,
+    ck_gemm(cublasGemmEx((cublasHandle_t) handle_, CUBLAS_OP_T, CUBLAS_OP_N, (int) N, (int) T, (int) K, &alpha, W,
                     CUDA_R_16F, (int) K, X, CUDA_R_16F, (int) K, &beta, Y, CUDA_R_32F, (int) ldy,
                     CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT),
-       "cublasGemmEx f16");
+       "f16", T, N, K, ldy);
     STRATA_ABSORB_HIPBLAS_STICKY("cublasGemmEx f16");
 }
 

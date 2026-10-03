@@ -78,6 +78,12 @@ halves the KV cache's memory with a Hadamard rotation before 4-bit rounding (PR 
 is measurably less precise on long documents (perplexity +8-12%; needle tests still pass). 8-bit stays the default.
 Details: [`bench/results/2026-09-27-kv-q4`](../bench/results/2026-09-27-kv-q4/README.md).
 
+**FP16 KV:** setup accepts `--kv fp16` at any context. It stores K/V without the optional INT8 or 4-bit rounding;
+at the native 262144-token context, the main attention layers and MTP need about 6.5 GiB for K/V alone. It can use
+KV streaming on native Linux, preserving the stored FP16 values. Longer contexts and additional conversations also
+need RAM for indexer state, checkpoints and buffers. Model quantization and Unsloth's compatibility conversions
+are separate from KV precision.
+
 **Hybrid K8V4 KV cache (engine 0.1.25, optional, PR #120):** `--kv k8v4` (`START-HERE.bat --setup --kv k8v4`) keeps
 the keys at 8 bits and stores the values as rotated 4-bit: 23% less KV memory than 8-bit, so more experts fit in
 VRAM. RTX 3090, the Coder at 198K context: 99 instead of 85 tokens/s output, the same needle results, prompts 2-5%

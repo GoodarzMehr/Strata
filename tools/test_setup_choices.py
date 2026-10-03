@@ -79,6 +79,15 @@ class GgufDirShards(unittest.TestCase):
         self.assertEqual(self.shards(names + ["mmproj-F16.gguf"], model="Q4_K_XL"), names)
         self.assertEqual(self.shards(names[:1], model="Q4_K_XL"), names)   # the others named from the first
 
+    def test_merged_unsloth_model_ignores_mtp_and_other_quants(self):
+        names = [setup.UNSLOTH_MERGED, "mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf", "model-Q4_K_M.gguf"]
+        self.assertEqual(self.shards(names, "unsloth", "UD-Q4_K_XL"), [setup.UNSLOTH_MERGED])
+        self.assertEqual(setup.gguf_choice(setup.UNSLOTH_MERGED), ("unsloth", "UD-Q4_K_XL"))
+
+    def test_published_unsloth_shards_take_precedence_over_merged(self):
+        names = list(setup.UNSLOTH_SHARDS)
+        self.assertEqual(self.shards(names + [setup.UNSLOTH_MERGED], "unsloth", "UD-Q4_K_XL"), names)
+
     def test_another_split_of_a_setup_size(self):
         names = ["my-IQ3_XXS-%05d-of-00003.gguf" % i for i in range(1, 4)]
         other = ["my-Q2_0-%05d-of-00002.gguf" % i for i in range(1, 3)]

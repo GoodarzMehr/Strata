@@ -120,7 +120,9 @@ START-HERE.bat --setup --family swift --model IQ2_XS
 to the full model, but a 111 GB download whose 77 GB of experts do not fit in RAM. Strata keeps your RAM minus 24 GB
 of them in RAM and reads the rest from the SSD while it answers: 7-8.5 tokens/s on a 64 GB PC with a 12 GB GPU, several
 times slower than the sizes above, and long prompts are slow. It needs 48 GB of RAM or more, an NVMe SSD and one
-NVIDIA GPU (no images yet). Details and measurements: [UD-Q4_K_XL](UNSLOTH_Q4.md).
+NVIDIA GPU in that default RAM-budget mode (no images yet). Explicit `--low-ram mmap --gpus 0,1` instead supports
+two GPUs and direct access to a local GGUF through the OS file cache. A dual RTX 4090 / Ryzen 9950X / 96 GB Ubuntu
+PC completed 262K FP16 context; see the [setup and measurements](UNSLOTH_Q4.md#local-gguf-two-gpus-and-fp16-kv).
 
 ```
 START-HERE.bat --setup --family unsloth --model UD-Q4_K_XL

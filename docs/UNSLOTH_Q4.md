@@ -2,7 +2,8 @@
 
 **Experimental.** Setup offers it from engine 0.1.32 ([below](#setup)); the manual workflow after that section works
 with engine 0.1.31 or newer. Validated on one PC: Windows 10, an RTX 5070 (12 GB), 64 GB of RAM and an AVX-512 CPU,
-on 2026-10-01.
+on 2026-10-01. Also tested with two RTX 4090s on Ubuntu 22.04, a Ryzen 9950X and 96 GB of RAM on
+2026-10-02: [FP16 context measurements](../bench/results/2026-10-02-dual-4090-q4-fp16/README.md).
 
 The target is Unsloth's 4-bit quantization of the same model the other packs use:
 [unsloth/Qwen3.8-Flash-Next-GGUF, `UD-Q4_K_XL`, revision `38bb39e`](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/tree/38bb39ee97821de2c9009abb7e93950eec396e66/UD-Q4_K_XL).
@@ -25,16 +26,65 @@ What setup does differently for this model:
 - It needs 48 GB of RAM or more (with less it asks, default no; `--model UD-Q4_K_XL --yes` installs it anyway) and
   engine 0.1.32 or newer (checked before anything is downloaded), and an NVIDIA
   GPU: it has not been run on AMD cards (its prompt kernels for the Q4_K / Q5_K experts are NVIDIA-only), so with
-  `--backend hip` setup says so and asks before the download (#429; `--model UD-Q4_K_XL --yes` tries it). One GPU only: with `--gpus` it uses the first one and says so. No images (the vision encoder is not wired to
+  `--backend hip` setup says so and asks before the download (#429; `--model UD-Q4_K_XL --yes` tries it). The default
+  RAM-budget mode uses one GPU; explicit `--low-ram mmap` supports a layer split (below). No images (the vision encoder is not wired to
   this file yet) and no experimental speed projection (not tested with it).
 - It downloads the four shards below from the pinned revision `38bb39e` (resumable, like the other models), then
   checks each one's size and SHA-256 against the table below; the check takes a few minutes once and is remembered
   in the file's finish mark. A file with the wrong hash is deleted, so the next run downloads it again.
-- It packs with `--compat-bf16` and never writes `experts.bin` (`--low-ram` does not apply).
+- It packs with `--compat-bf16` and never writes `experts.bin`. `--low-ram mmap` selects direct mapping instead of
+  the default resident RAM budget.
 - The RAM budget is the PC's RAM less 24 GB: `--resident-budget-gib 40` on 64 GB, at most all 71 GiB of experts on
   96 GB or more. From a 64K context up, where the KV cache moves to RAM, its size comes out of the budget. Setup's
   `--resident-budget-gib N` sets another one (a bigger one is kept, with a note on what it risks).
 - It recommends an 8K context on a GPU under 14 GB (every GB of KV cache is a GB less of cached experts).
+
+### Local GGUF, two GPUs and FP16 KV
+
+An explicit `--low-ram mmap` reads the experts from the GGUF through the OS file cache and can split the model
+across two GPUs. It does not use the fixed RAM budget above. Experts outside the GPU caches are computed on the CPU;
+their file pages share the available system RAM with the rest of the PC. No second `experts.bin` is written.
+The default budget mode still uses one GPU.
+
+`--gguf-dir` also accepts the merged `Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf`, alongside unrelated models and MTP files.
+Use `--mtp-gguf` with the full or shared **BF16** MTP GGUF to import the draft tensors already on disk. The importer
+checks all 31 reconstructed tensors against the pinned checkpoint's SHA256 before they are packed; an incompatible
+or quantized MTP file is refused. The small Q2 draft proposes tokens which the Q4 target model verifies.
+
+For two RTX 4090s, a local model folder and FP16 KV:
+
+```sh
+./setup.sh --yes --family unsloth --model UD-Q4_K_XL \
+  --gguf-dir "$HOME/LLMs" --mtp-gguf "$HOME/LLMs/mtp-Qwen3.8-Flash-Next-BF16.gguf" \
+  --data-dir "$PWD/strata-data" --low-ram mmap --gpus 0,1 \
+  --context 262144 --kv fp16 --kv-streaming on --vram-reserve-mib 1280 --vision no --no-start
+./run-unsloth-ud-q4_k_xl.sh
+```
+
+On that Linux PC, a 199799-token prompt at context 200000 completed in 133.5 seconds before decoding at
+62.5 tokens/s; a 261899-token prompt at context 262144 took 156.7 seconds before decoding at 57.9 tokens/s.
+Both retrieved three markers at roughly 10%, 50% and 90% of the document. These are single 192-output-token runs,
+with default draft settings, not a general quality evaluation or a guaranteed output rate. The 1280 MiB reserve
+was needed: the default 700 MiB reserve ran out of memory in prompt processing or graph creation on this PC.
+See the measurement link above for the setup, calibration and raw results.
+
+Context includes the prompt and the answer. Change it with `--setup --context N --kv fp16` while retaining the other
+options above, or edit `--max-context` in `strata-unsloth-ud-q4_k_xl.json`, then restart. `200000` is a smaller option;
+`262144` is this GGUF's native limit. Longer windows need experimental RoPE scaling and are not a promise of the
+same accuracy. KV streaming keeps the complete FP16 cache in RAM and fetches selected old blocks into VRAM;
+the 32,768-position resident capacity does not truncate the conversation. Main and draft K/V storage at 262144 is
+about 6.5 GiB of host RAM, before indexer state, checkpoints and prompt buffers. Each GPU owns its layers' state.
+
+FP16 avoids additional KV compression. The required `--compat-bf16` weight conversions below still apply, so this
+is not a claim of identical logits to llama.cpp or the original BF16 model. Keep experimental speed projection
+off. Setup's other model choices are the specific GSQ-RCO Q2_0, IQ2_XS, IQ3_XXS and IQ3_S files, plus the Coder's
+IQ1_M; changing to these changes model quantization and does not satisfy a requirement to retain Q4_K_XL.
+It does not mean that any arbitrary Q4, Q5 or Q8 GGUF is supported. The engine also offers INT8, Q4_0 and hybrid
+K8V4 KV; all add KV rounding compared with FP16. K8V4 cannot use KV streaming. Keep FP16 for this setup.
+
+Several agent clients can use this server, but generation is serialized. Full conversation parking supports
+alternating histories on one GPU and is currently rejected with a GPU layer split. There is no simultaneous
+generation with a unified KV pool corresponding to llama.cpp's `-np 2 -kvu`.
 
 ## The files
 
